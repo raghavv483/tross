@@ -39,11 +39,14 @@ function toAppError(error: unknown): AppError {
   if (isBodyParserError(error)) {
     // entity.too.large  -> the 10 kb cap was exceeded
     // entity.parse.failed -> the body was not valid JSON
-    return new AppError('INVALID_PROFILE_URL', {
+    // INVALID_REQUEST_BODY, not INVALID_PROFILE_URL: the request never parsed,
+    // so there is no URL to have been wrong. Telling someone who sent a 12 kb
+    // body to check their LinkedIn URL sends them to the wrong place entirely.
+    return new AppError('INVALID_REQUEST_BODY', {
       publicMessage:
         error.type === 'entity.too.large'
           ? 'Request body is too large. The maximum accepted size is 10 kb.'
-          : 'Request body is not valid JSON.',
+          : 'Request body could not be parsed as JSON.',
       cause: error,
     });
   }

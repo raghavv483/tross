@@ -13,6 +13,22 @@ import { AppError } from '../errors/AppError.js';
 
 export function validateBody<T>(schema: ZodType<T>): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction): void => {
+    /**
+     * `express.json()` leaves `req.body` undefined when it declined to parse -
+     * no body at all, or a content type other than application/json. That is
+     * SPEC §4's INVALID_REQUEST_BODY: the request never parsed, so there is no
+     * `url` field to have been wrong about.
+     */
+    if (req.body === undefined) {
+      next(
+        new AppError('INVALID_REQUEST_BODY', {
+          publicMessage:
+            'Request body is missing, or was sent with a content type other than application/json.',
+        }),
+      );
+      return;
+    }
+
     const result = schema.safeParse(req.body);
 
     if (!result.success) {

@@ -98,6 +98,7 @@ rather than rediscovering them.
 | Vitest 4 removed the `basic` reporter | use the default reporter |
 | Server appears dead with `LOG_LEVEL=silent` | it is running and bound; silent means zero output. Use `info` when smoke testing |
 | ESM + `moduleResolution: nodenext` | **all relative imports need a `.js` extension**, even from `.ts` files |
+| `npm start` does not forward SIGTERM to the node child | the container start command must be `node dist/server.js` directly. Under `npm start`, npm is PID 1, the signal never reaches the handler, and graceful shutdown silently does nothing in production |
 | Long multi-file heredoc batches can silently truncate | write files in small batches and `ls` to confirm each landed before continuing. This has bitten this project three times |
 
 ---

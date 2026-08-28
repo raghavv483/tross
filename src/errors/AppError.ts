@@ -13,6 +13,7 @@
 /** Machine-readable error codes. SPEC.md §4. */
 export const ERROR_CODES = [
   'INVALID_PROFILE_URL',
+  'INVALID_REQUEST_BODY',
   'PROFILE_NOT_FOUND',
   'SOURCE_UNAUTHORIZED',
   'SOURCE_NOT_AUTHORIZED_FOR_URL',
@@ -29,6 +30,7 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 /** HTTP status for each code. SPEC.md §4. */
 const STATUS_BY_CODE: Readonly<Record<ErrorCode, number>> = {
   INVALID_PROFILE_URL: 400,
+  INVALID_REQUEST_BODY: 400,
   PROFILE_NOT_FOUND: 404,
   SOURCE_UNAUTHORIZED: 403,
   SOURCE_NOT_AUTHORIZED_FOR_URL: 403,
@@ -49,6 +51,8 @@ const STATUS_BY_CODE: Readonly<Record<ErrorCode, number>> = {
 const DEFAULT_MESSAGE_BY_CODE: Readonly<Record<ErrorCode, string>> = {
   INVALID_PROFILE_URL:
     'The supplied URL is not a valid LinkedIn profile URL.',
+  INVALID_REQUEST_BODY:
+    'The request body could not be read. Expected a JSON object of at most 10 kb.',
   PROFILE_NOT_FOUND: 'No profile was found for the supplied URL.',
   SOURCE_UNAUTHORIZED:
     'The configured profile source is not authorized to retrieve profile data.',
@@ -123,6 +127,9 @@ export class AppError extends Error {
 /** Convenience constructors — keep call sites at the throw site readable. */
 export const invalidProfileUrl = (publicMessage?: string, cause?: unknown): AppError =>
   new AppError('INVALID_PROFILE_URL', { publicMessage, cause });
+
+export const invalidRequestBody = (publicMessage?: string, cause?: unknown): AppError =>
+  new AppError('INVALID_REQUEST_BODY', { publicMessage, cause });
 
 export const profileNotFound = (publicMessage?: string, cause?: unknown): AppError =>
   new AppError('PROFILE_NOT_FOUND', { publicMessage, cause });

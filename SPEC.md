@@ -162,7 +162,8 @@ Slugs are lowercased.
 
 | Code | HTTP | Raised when |
 |---|---|---|
-| `INVALID_PROFILE_URL` | 400 | Body or URL fails validation (§3) |
+| `INVALID_PROFILE_URL` | 400 | The `url` field is absent, or fails validation (§3) |
+| `INVALID_REQUEST_BODY` | 400 | The body could not be read at all: malformed JSON, wrong content type, or over the 10 kb cap |
 | `PROFILE_NOT_FOUND` | 404 | Source has no profile for this URL; also unmatched routes |
 | `SOURCE_UNAUTHORIZED` | 403 | Source is not authorized at all — typically misconfiguration |
 | `SOURCE_NOT_AUTHORIZED_FOR_URL` | 403 | Source is healthy and authorized, but not for *this* profile |
@@ -172,6 +173,12 @@ Slugs are lowercased.
 | `UPSTREAM_ERROR` | 502 | Upstream returned an error |
 | `MALFORMED_SOURCE_RESPONSE` | 502 | Either the source returned a non-object, or the parser's output failed domain-schema verification. See note below |
 | `INTERNAL_ERROR` | 500 | Anything unrecognised |
+
+`INVALID_REQUEST_BODY` and `INVALID_PROFILE_URL` are separated deliberately.
+Both are 400s, but they send a client to different places: the first means the
+request never parsed, the second means it parsed and the URL was wrong.
+Collapsing them tells someone who sent a 12 kb body to go and check their
+LinkedIn URL.
 
 **`MALFORMED_SOURCE_RESPONSE` is raised at two distinct points.** Because every
 scalar in the domain model is nullable and every list defaults to `[]`, garbage

@@ -220,22 +220,47 @@ describe('SPEC §8 case 8 - missing or empty url field', () => {
     expect(response.status).toBe(400);
   });
 
-  it('rejects a body that is not valid JSON', async () => {
+  it('rejects a body that is not valid JSON with INVALID_REQUEST_BODY', async () => {
     const response = await request(app())
       .post(PROFILE_ENDPOINT)
       .set('Content-Type', 'application/json')
       .send('{"url": ');
 
     expect(response.status).toBe(400);
-    expect(response.body.error.code).toBe('INVALID_PROFILE_URL');
+    expect(response.body.error.code).toBe('INVALID_REQUEST_BODY');
   });
 
-  it('rejects a body over the 10 kb cap', async () => {
+  it('rejects a body over the 10 kb cap with INVALID_REQUEST_BODY', async () => {
     const response = await request(app())
       .post(PROFILE_ENDPOINT)
       .send({ url: profileUrl('x'), padding: 'a'.repeat(11 * 1024) });
 
     expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_REQUEST_BODY');
+  });
+
+  it('rejects a wrong content type with INVALID_REQUEST_BODY', async () => {
+    const response = await request(app())
+      .post(PROFILE_ENDPOINT)
+      .set('Content-Type', 'text/plain')
+      .send('https://www.linkedin.com/in/complete-profile');
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_REQUEST_BODY');
+  });
+
+  it('rejects a missing body with INVALID_REQUEST_BODY', async () => {
+    const response = await request(app()).post(PROFILE_ENDPOINT);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('INVALID_REQUEST_BODY');
+  });
+
+  it('keeps the two 400s distinct: a parsed body with a bad url is INVALID_PROFILE_URL', async () => {
+    // Collapsing these would tell someone who sent a 12 kb body to go and
+    // check their LinkedIn URL.
+    const response = await request(app()).post(PROFILE_ENDPOINT).send({ url: 'not a url' });
+
     expect(response.body.error.code).toBe('INVALID_PROFILE_URL');
   });
 
@@ -446,6 +471,10 @@ describe('SPEC §8 case 18 - error bodies never leak', () => {
 
     return {
       '400': await request(app()).post(PROFILE_ENDPOINT).send({ url: 'not a url' }),
+      '400-body': await request(app())
+        .post(PROFILE_ENDPOINT)
+        .set('Content-Type', 'application/json')
+        .send('{"url": '),
       '404': await request(app())
         .post(PROFILE_ENDPOINT)
         .send({ url: profileUrl('nobody-here') }),
@@ -459,8 +488,8 @@ describe('SPEC §8 case 18 - error bodies never leak', () => {
   it('returns the expected status for each class', async () => {
     const byStatus = await responses();
 
-    for (const [expected, response] of Object.entries(byStatus)) {
-      expect(response.status).toBe(Number(expected));
+    for (const [label, response] of Object.entries(byStatus)) {
+      expect(response.status, label).toBe(Number(label.split('-')[0]));
     }
   });
 

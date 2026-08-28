@@ -13,6 +13,7 @@ import { getEnv, type Env } from './config/env.js';
 import { createLogger, type Logger } from './config/logger.js';
 import { ProfileController } from './controllers/profileController.js';
 import { AppError } from './errors/AppError.js';
+import { createDocsRouter } from './docs/router.js';
 import { createErrorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { API_PREFIX, createRouter } from './routes/index.js';
 import { ProfileService } from './services/ProfileService.js';
@@ -52,6 +53,16 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   // N4: the only valid request is one short URL.
   app.use(express.json({ limit: '10kb' }));
+
+  /**
+   * Documentation is mounted BEFORE the rate limiter, and that ordering is
+   * load-bearing. The limiter below is attached to the `/api/v1` prefix, and
+   * both `/api/v1/docs` and `/api/v1/openapi.json` sit inside that prefix - so
+   * registering them afterwards would spend a client's request budget on
+   * reading the reference. Express runs middleware in registration order, so
+   * being first is what exempts them.
+   */
+  app.use(createDocsRouter());
 
   // Mounted on the API prefix only, which is what makes /health exempt.
   app.use(

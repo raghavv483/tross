@@ -235,7 +235,7 @@ it is a `Could`, and §4 of the error contract matters more.
 | `PROFILE_SOURCE` | `fixture` | `fixture` \| `linkedin-oidc` |
 | `RATE_LIMIT_MAX` | `30` | per IP per window |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | |
-| `CACHE_TTL_SECONDS` | `900` | `0` disables caching |
+| `CACHE_TTL_SECONDS` | `900` | `0` disables caching entirely — nothing is stored |
 | `LINKEDIN_CLIENT_ID` | — | required only when `PROFILE_SOURCE=linkedin-oidc` |
 | `LINKEDIN_CLIENT_SECRET` | — | as above |
 | `LINKEDIN_REDIRECT_URI` | — | as above |
@@ -245,6 +245,14 @@ and the error names the failing **keys only** — never their values, since one
 may be a secret.
 
 ---
+
+### Cache bounds
+
+The cache is capped at 1000 entries with oldest-insertion eviction. This is not
+a performance optimisation. The key space is attacker-influenced — every
+distinct valid slug produces a distinct key — so an unbounded map is a
+memory-growth vector on a public endpoint. Expiry is evaluated on read rather
+than by timer, so the cache never holds the event loop open.
 
 ## 7. Fixture source
 

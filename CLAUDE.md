@@ -154,14 +154,21 @@ reconsider.
 
 ## Current status
 
-**Greenfield. No source code exists yet.** `src/` and `tests/` are empty.
+**Do not trust a hardcoded status here — it goes stale every milestone.**
+Check the actual state instead:
+
+```bash
+git log --oneline          # what has been completed
+ls src/**/*.ts tests/      # what exists
+npm test && npm run typecheck
+```
 
 The four markdown files in this root are specifications, not descriptions of
-existing code. `SPEC.md` is the contract to build against; `ARCHITECTURE.md` is
-the target structure; `PRD.md` is scope and acceptance criteria.
+existing code. `SPEC.md` is the contract; `ARCHITECTURE.md` is the target
+structure; `PRD.md` is scope and acceptance criteria.
 
 Build order: scaffold and config, then errors and types, then URL validation,
-then fixtures and the fixture source, then parsers, then service, then HTTP
-layer, then tests, then OpenAPI plus Swagger UI, then README, then deploy.
-The static demo page and the `linkedin-oidc` adapter are both optional and come
-last, only if the Must and Should requirements in PRD.md have all landed.
+then fixtures and the fixture source, then parsers, then service and cache,
+then the HTTP layer, then integration tests, then OpenAPI plus Swagger UI, then
+README, then deploy. The static demo page and the `linkedin-oidc` adapter are
+both optional and come last, only if every Must and Should in PRD.md has landed.

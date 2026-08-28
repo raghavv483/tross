@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { AppError, type ErrorCode } from '../src/errors/AppError.js';
 import { ProfileService } from '../src/services/ProfileService.js';
@@ -47,6 +47,15 @@ class ReturningSource implements ProfileSource {
     return Promise.resolve(this.payload as RawProfile);
   }
 }
+
+/**
+ * A parser with a genuine bug in it: a number where a nullable string belongs,
+ * and a string where a list belongs. Injected to prove the service verifies
+ * the parser's own output - the real parser cannot be coaxed into emitting
+ * this, which is exactly what invariant 5 buys.
+ */
+const brokenParser = (_raw: RawProfile): Profile =>
+  ({ name: 42, experience: 'not an array' }) as unknown as Profile;
 
 /** Asserts a rejection is an AppError carrying the expected code and status. */
 const expectAppError = async (
@@ -147,31 +156,6 @@ describe('other upstream failures propagate untouched', () => {
   });
 });
 
-/**
- * Simulates a genuine bug in the parser, which is what SPEC §8 case 12b
- * describes. The real parser cannot be coaxed into emitting invalid output -
- * that is the point of invariant 5 - so the only way to prove the service
- * verifies the parser's work is to make the parser misbehave on purpose.
- *
- * Everything except the sentinel input passes straight through to the real
- * implementation, so no other test in this file is affected.
- */
-vi.mock('../src/parsers/index.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/parsers/index.js')>();
-
-  return {
-    ...actual,
-    parseRawProfile: (raw: RawProfile) => {
-      if ((raw as Record<string, unknown>)['__breakParser'] === true) {
-        // Structurally invalid: a number where a nullable string belongs, and
-        // a string where a list belongs.
-        return { name: 42, experience: 'not an array' } as unknown as Profile;
-      }
-      return actual.parseRawProfile(raw);
-    },
-  };
-});
-
 describe('SPEC §8 case 12a - source returns a non-object', () => {
   it.each([
     ['null', null],
@@ -220,7 +204,7 @@ describe('SPEC §8 case 12a - source returns a non-object', () => {
 
 describe('SPEC §8 case 12b - parser output fails schema verification', () => {
   it('rejects with MALFORMED_SOURCE_RESPONSE', async () => {
-    const service = new ProfileService(new ReturningSource({ __breakParser: true }), cache());
+    const service = new ProfileService(new ReturningSource(completeProfile), cache(), brokenParser);
     await expectAppError(service.getProfile(URL_COMPLETE), 'MALFORMED_SOURCE_RESPONSE', 502);
   });
 
@@ -228,7 +212,11 @@ describe('SPEC §8 case 12b - parser output fails schema verification', () => {
     // 12a is a bad upstream response; 12b is a bug in our own parser. Both are
     // 502 and neither is the parser's responsibility to detect.
     const nonObject = new ProfileService(new ReturningSource(null), cache());
-    const badParse = new ProfileService(new ReturningSource({ __breakParser: true }), cache());
+    const badParse = new ProfileService(
+      new ReturningSource(completeProfile),
+      cache(),
+      brokenParser,
+    );
 
     const first = await expectAppError(
       nonObject.getProfile(URL_COMPLETE),
@@ -248,7 +236,7 @@ describe('SPEC §8 case 12b - parser output fails schema verification', () => {
   });
 
   it('keeps the Zod issues out of the public body', async () => {
-    const service = new ProfileService(new ReturningSource({ __breakParser: true }), cache());
+    const service = new ProfileService(new ReturningSource(completeProfile), cache(), brokenParser);
     const error = await expectAppError(
       service.getProfile(URL_COMPLETE),
       'MALFORMED_SOURCE_RESPONSE',
@@ -259,8 +247,8 @@ describe('SPEC §8 case 12b - parser output fails schema verification', () => {
   });
 
   it('does not cache an unverified profile', async () => {
-    const source = new ReturningSource({ __breakParser: true });
-    const service = new ProfileService(source, cache());
+    const source = new ReturningSource(completeProfile);
+    const service = new ProfileService(source, cache(), brokenParser);
 
     await expectAppError(service.getProfile(URL_COMPLETE), 'MALFORMED_SOURCE_RESPONSE', 502);
     await expectAppError(service.getProfile(URL_COMPLETE), 'MALFORMED_SOURCE_RESPONSE', 502);

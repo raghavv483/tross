@@ -10,8 +10,18 @@ import { isRecord } from '../parsers/guards.js';
 import { parseRawProfile } from '../parsers/index.js';
 import type { ProfileSource } from '../sources/ProfileSource.js';
 import { ProfileSchema, type Profile } from '../types/profile.js';
+import type { RawProfile } from '../types/raw.js';
 import type { TtlCache } from '../utils/cache.js';
 import { parseLinkedInProfileUrl } from '../utils/linkedinUrl.js';
+
+/**
+ * Normalizes a raw upstream payload into the domain model.
+ *
+ * Injected so a test can substitute a deliberately broken parser and prove the
+ * verification step in `getProfile` actually catches it. Production code never
+ * passes this argument.
+ */
+export type ProfileParser = (raw: RawProfile) => Profile;
 
 export interface ProfileResult {
   readonly profile: Profile;
@@ -27,6 +37,7 @@ export class ProfileService {
   constructor(
     private readonly source: ProfileSource,
     private readonly cache: TtlCache<Profile>,
+    private readonly parse: ProfileParser = parseRawProfile,
   ) {}
 
   get sourceName(): string {
@@ -76,7 +87,7 @@ export class ProfileService {
     }
 
     // 5. Normalize. Pure, and degrades rather than throwing.
-    const parsed = parseRawProfile(raw);
+    const parsed = this.parse(raw);
 
     // 6. Verify the PARSER'S OWN OUTPUT. SPEC §4, §8 case 12b.
     //    A different failure from case 12a: this catches a genuine bug in the

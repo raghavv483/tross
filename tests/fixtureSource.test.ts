@@ -62,16 +62,20 @@ describe('createProfileSource', () => {
   });
 
   it('throws for linkedin-oidc, which is deliberately not implemented', () => {
-    expect(() => createProfileSource('linkedin-oidc')).toThrowError(AppError);
+    expect(() => createProfileSource('linkedin-oidc')).toThrowError(/not implemented/);
+  });
 
+  it('throws a plain Error, not an AppError, because this fires at boot', () => {
+    // The deliberate exception to invariant 2. This is a misconfiguration that
+    // must stop the process before the server binds - it can never be reached
+    // from a request, so it carries no HTTP status and no client-safe message.
     try {
       createProfileSource('linkedin-oidc');
       expect.unreachable('expected createProfileSource to throw');
     } catch (error) {
-      const appError = error as AppError;
-      expect(appError.code).toBe('SOURCE_UNAUTHORIZED');
-      expect(appError.statusCode).toBe(403);
-      expect(appError.publicMessage).toContain('not implemented');
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(AppError);
+      expect((error as Error).message).toContain('PROFILE_SOURCE=linkedin-oidc');
     }
   });
 });

@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# secrets — never commit. .env.example is the committed template.
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+logs/
+
+# test / coverage
+coverage/
+.vitest/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

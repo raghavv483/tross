@@ -85,9 +85,10 @@ npm test           # vitest run
 
 ---
 
-## Environment gotchas already paid for
+## Known environment gotchas
 
-These cost time once. Do not rediscover them.
+These were hit on a previous build of this same stack. Apply them up front
+rather than rediscovering them.
 
 | Issue | Resolution |
 |---|---|
@@ -97,7 +98,7 @@ These cost time once. Do not rediscover them.
 | Vitest 4 removed the `basic` reporter | use the default reporter |
 | Server appears dead with `LOG_LEVEL=silent` | it is running and bound; silent means zero output. Use `info` when smoke testing |
 | ESM + `moduleResolution: nodenext` | **all relative imports need a `.js` extension**, even from `.ts` files |
-| Long multi-file heredoc batches can time out mid-run | write files in small batches and `ls` to confirm they landed |
+| Long multi-file heredoc batches can silently truncate | write files in small batches and `ls` to confirm each landed before continuing. This has bitten this project three times |
 
 ---
 
@@ -153,9 +154,14 @@ reconsider.
 
 ## Current status
 
-Built and typechecking: config, logger, error taxonomy, URL validation, domain
-schemas, raw types, three fixtures, fixture source, parsers, service, cache,
-middleware, controller, routes, app, server.
+**Greenfield. No source code exists yet.** `src/` and `tests/` are empty.
 
-Not yet done: test suite, OpenAPI document, `README.md`, deployment, and the
-`linkedin-oidc` adapter (`src/sources/index.ts` throws for it today).
+The four markdown files in this root are specifications, not descriptions of
+existing code. `SPEC.md` is the contract to build against; `ARCHITECTURE.md` is
+the target structure; `PRD.md` is scope and acceptance criteria.
+
+Build order: scaffold and config, then errors and types, then URL validation,
+then fixtures and the fixture source, then parsers, then service, then HTTP
+layer, then tests, then OpenAPI plus Swagger UI, then README, then deploy.
+The static demo page and the `linkedin-oidc` adapter are both optional and come
+last, only if the Must and Should requirements in PRD.md have all landed.

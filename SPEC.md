@@ -113,6 +113,7 @@ degrades to year-only.
 | Position group with empty `elements` | dropped entirely |
 | `isCurrent` | `true` when a start exists and no end; `false` when an end exists; `null` when there is no date information at all |
 | Image artifacts | `url` is `rootUrl + fileIdentifyingUrlPathSegment`; artifacts with no path segment are dropped |
+| Artifact with a path segment but no `rootUrl` | dropped, unless the segment is already absolute. An unresolvable relative URL is worse for a consumer than an absent entry |
 | Skills with no usable name | dropped, since `skills[].name` is non-nullable |
 | `location` | `"City, Country"` when both present, otherwise whichever exists, otherwise `null` |
 
@@ -169,8 +170,17 @@ Slugs are lowercased.
 | `RATE_LIMITED` | 429 | *Our* per-IP limit was exceeded |
 | `SOURCE_UNAVAILABLE` | 503 | Upstream unreachable or timed out |
 | `UPSTREAM_ERROR` | 502 | Upstream returned an error |
-| `MALFORMED_SOURCE_RESPONSE` | 502 | Parser output failed domain-schema verification |
+| `MALFORMED_SOURCE_RESPONSE` | 502 | Either the source returned a non-object, or the parser's output failed domain-schema verification. See note below |
 | `INTERNAL_ERROR` | 500 | Anything unrecognised |
+
+**`MALFORMED_SOURCE_RESPONSE` is raised at two distinct points.** Because every
+scalar in the domain model is nullable and every list defaults to `[]`, garbage
+input parses cleanly into a valid empty profile — so the parser cannot be the
+thing that detects it, and invariant 5 forbids making it throw. `ProfileService`
+must therefore reject a non-object raw response *before* parsing. The
+`ProfileSchema.parse` verification *after* parsing catches a different failure:
+a genuine bug in the parser itself. Both surface as 502; neither is the
+parser's responsibility.
 
 `SOURCE_UNAUTHORIZED` and `SOURCE_NOT_AUTHORIZED_FOR_URL` are deliberately
 distinct — the second is the normal, expected answer from a self-scoped source
@@ -193,6 +203,26 @@ Exempt from rate limiting. `authorizationScope` is surfaced so the deployment's
 data-access basis is inspectable without reading the source.
 
 ---
+
+## 5b. `GET /api/v1/docs`
+
+Swagger UI, served from an OpenAPI 3 document generated at boot via
+`z.toJSONSchema()` over the same schemas used for request validation and
+response envelopes. It therefore cannot drift from the implementation.
+
+Exempt from rate limiting. Documents `POST /api/v1/profile`, `GET /health`,
+the profile schema (§2) and every error code (§4).
+
+## 5c. `GET /` — demo page (optional, F12)
+
+A single static HTML file served by the same Express app. One URL input, one
+submit button, formatted JSON output, and visible error rendering for the
+non-200 cases.
+
+Constraints: no framework, no bundler, no build step, no second deployment, no
+new runtime dependency. It calls `POST /api/v1/profile` on its own origin, so
+no CORS configuration is required. If it starts needing any of those, drop it —
+it is a `Could`, and §4 of the error contract matters more.
 
 ## 6. Configuration
 
@@ -245,7 +275,8 @@ Any other slug returns `404 PROFILE_NOT_FOUND`.
 | 9 | Unknown slug | 404 `PROFILE_NOT_FOUND` |
 | 10 | Stub source throws `SOURCE_UNAUTHORIZED` | 403 |
 | 11 | Stub source throws `SOURCE_RATE_LIMITED` | 429 |
-| 12 | Stub source returns unparseable data | 502 `MALFORMED_SOURCE_RESPONSE` |
+| 12a | Stub source returns a non-object (`null`, `42`, `'str'`, `[]`) | 502 `MALFORMED_SOURCE_RESPONSE` |
+| 12b | Parser output fails `ProfileSchema.parse` | 502 `MALFORMED_SOURCE_RESPONSE` |
 | 13 | Same URL twice | second response `meta.cached === true` |
 | 14 | Casing / subdomain variants | share one cache entry |
 | 15 | Exceed rate limit | 429 `RATE_LIMITED` |

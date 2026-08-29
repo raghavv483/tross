@@ -32,7 +32,7 @@ export interface CreateAppOptions {
 export function createApp(options: CreateAppOptions = {}): Express {
   const env = options.env ?? getEnv();
   const logger = options.logger ?? createLogger(env);
-  const source = options.source ?? createProfileSource(env.PROFILE_SOURCE);
+  const source = options.source ?? createProfileSource(env);
 
   const cache = createProfileCache<Profile>(env.CACHE_TTL_SECONDS);
   const service = new ProfileService(source, cache);

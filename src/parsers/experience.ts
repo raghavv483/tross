@@ -13,7 +13,7 @@ import { isRecord, readPath, readProperty, toArray } from './guards.js';
 import { firstText, toNullableText } from './text.js';
 
 /**
- * `isCurrent`:
+ * Derives `isCurrent` from the dates, when the source did not state it:
  *   - `true`  when a start exists and no end
  *   - `false` when an end exists
  *   - `null`  when there is no date information at all
@@ -21,6 +21,10 @@ import { firstText, toNullableText } from './text.js';
  * The third case is the one worth being careful about: "we do not know" is not
  * the same claim as "not a current role", and collapsing them would invent
  * information the source never provided.
+ *
+ * Inference is a fallback, not the rule. It cannot tell a current role from a
+ * past one whose end date was never recorded, so a source that declares the
+ * answer takes precedence - see `RawPosition.isCurrent`.
  */
 function resolveIsCurrent(startDate: string | null, endDate: string | null): boolean | null {
   if (endDate !== null) return false;
@@ -60,6 +64,10 @@ export function parseExperience(raw: unknown): Experience[] {
       const startDate = parseRangeStart(dateRange);
       const endDate = parseRangeEnd(dateRange);
 
+      // A source-declared flag is authoritative; anything else falls back to
+      // deriving it from the dates, unchanged.
+      const declaredIsCurrent = readProperty(element, 'isCurrent');
+
       experience.push({
         company,
         title: toNullableText(readProperty(element, 'title')),
@@ -67,7 +75,10 @@ export function parseExperience(raw: unknown): Experience[] {
         location: toNullableText(readProperty(element, 'locationName')),
         startDate,
         endDate,
-        isCurrent: resolveIsCurrent(startDate, endDate),
+        isCurrent:
+          typeof declaredIsCurrent === 'boolean'
+            ? declaredIsCurrent
+            : resolveIsCurrent(startDate, endDate),
       });
     }
   }

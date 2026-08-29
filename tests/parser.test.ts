@@ -434,3 +434,53 @@ describe('every fixture parses to a schema-valid profile', () => {
     expect(parsed.experience.filter((entry) => entry.company === 'Tross')).toHaveLength(2);
   });
 });
+
+describe('a source-declared isCurrent overrides date inference', () => {
+  it('uses a declared false even when no end date exists', () => {
+    const raw = asRaw({
+      positionGroups: [
+        {
+          companyName: 'Former Employer',
+          elements: [{ title: 'Engineer', isCurrent: false, dateRange: { start: { year: 2020 } } }],
+        },
+      ],
+    });
+
+    expect(parseExperience(raw)[0]).toMatchObject({ endDate: null, isCurrent: false });
+  });
+
+  it('uses a declared true even when an end date exists', () => {
+    const raw = asRaw({
+      positionGroups: [
+        {
+          companyName: 'Still Here Ltd',
+          elements: [
+            {
+              title: 'Engineer',
+              isCurrent: true,
+              dateRange: { start: { year: 2020 }, end: { year: 2021 } },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(parseExperience(raw)[0]?.isCurrent).toBe(true);
+  });
+
+  it.each([[undefined], [null], ['true'], [1]])(
+    'falls back to date inference for the non-boolean flag %o',
+    (isCurrent) => {
+      const raw = asRaw({
+        positionGroups: [
+          {
+            companyName: 'Inferred Co',
+            elements: [{ title: 'Engineer', isCurrent, dateRange: { start: { year: 2020 } } }],
+          },
+        ],
+      });
+
+      expect(parseExperience(raw)[0]?.isCurrent).toBe(true);
+    },
+  );
+});

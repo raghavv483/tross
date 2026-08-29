@@ -5,18 +5,54 @@
  * `case` here. If a change requires touching controllers or parsers, the
  * abstraction has been violated - stop and reconsider.
  */
+import type { Env } from '../config/env.js';
+
+import { ApifySource } from './ApifySource.js';
 import { FixtureProfileSource } from './FixtureProfileSource.js';
 import type { ProfileSource } from './ProfileSource.js';
 
 /** Valid values of `PROFILE_SOURCE`. Reused by config validation. */
-export const PROFILE_SOURCE_NAMES = ['fixture', 'linkedin-oidc'] as const;
+export const PROFILE_SOURCE_NAMES = ['fixture', 'apify', 'linkedin-oidc'] as const;
 
 export type ProfileSourceName = (typeof PROFILE_SOURCE_NAMES)[number];
 
-export function createProfileSource(name: ProfileSourceName): ProfileSource {
+/**
+ * Builds the configured source.
+ *
+ * Takes the whole validated `Env` rather than just the name because a provider
+ * adapter needs its credentials, and `env.ts` is where secrets are read.
+ */
+export function createProfileSource(env: Env): ProfileSource {
+  const name: ProfileSourceName = env.PROFILE_SOURCE;
+
   switch (name) {
     case 'fixture':
       return new FixtureProfileSource();
+
+    case 'apify': {
+      /**
+       * The token is required by `env.ts` whenever this source is selected, so
+       * reaching here without it is impossible through the normal boot path.
+       * The check is kept because the type is optional - it converts a
+       * would-be `undefined` token into a loud boot failure rather than a
+       * Bearer header reading "Bearer undefined". The actor id and scraper
+       * mode both carry defaults, so they need no such guard.
+       */
+      const { APIFY_API_TOKEN, APIFY_ACTOR_ID, APIFY_PROFILE_SCRAPER_MODE, APIFY_TIMEOUT_MS } =
+        env;
+
+      if (APIFY_API_TOKEN === undefined) {
+        // Names the missing KEY only - never the token value.
+        throw new Error('PROFILE_SOURCE=apify requires APIFY_API_TOKEN to be set.');
+      }
+
+      return new ApifySource({
+        apiToken: APIFY_API_TOKEN,
+        actorId: APIFY_ACTOR_ID,
+        profileScraperMode: APIFY_PROFILE_SCRAPER_MODE,
+        timeoutMs: APIFY_TIMEOUT_MS,
+      });
+    }
 
     case 'linkedin-oidc':
       /**
@@ -55,5 +91,6 @@ export function createProfileSource(name: ProfileSourceName): ProfileSource {
   }
 }
 
+export { ApifySource } from './ApifySource.js';
 export { FixtureProfileSource } from './FixtureProfileSource.js';
 export type { ProfileSource } from './ProfileSource.js';

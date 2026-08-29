@@ -193,6 +193,14 @@ parser's responsibility.
 distinct — the second is the normal, expected answer from a self-scoped source
 such as OIDC and is not a fault.
 
+**Provider adapters reuse this taxonomy; they do not add codes.** The `apify`
+source maps provider outcomes onto existing codes: 401/403 → `SOURCE_UNAUTHORIZED`,
+429 → `SOURCE_RATE_LIMITED`, run timeout → `SOURCE_UNAVAILABLE`, empty dataset or
+no profile → `PROFILE_NOT_FOUND`, a response whose shape it cannot map →
+`MALFORMED_SOURCE_RESPONSE`, any other provider or network error → `UPSTREAM_ERROR`.
+The provider's raw error body, the API token, and request headers are never
+serialized to the client — only the mapped code and its fixed public message.
+
 ---
 
 ## 5. `GET /health`
@@ -239,10 +247,13 @@ it is a `Could`, and §4 of the error contract matters more.
 | `HOST` | `0.0.0.0` | |
 | `NODE_ENV` | `development` | `development` enables pretty logs |
 | `LOG_LEVEL` | `info` | incl. `silent` — note a silent server looks dead but is running |
-| `PROFILE_SOURCE` | `fixture` | `fixture` \| `linkedin-oidc` |
+| `PROFILE_SOURCE` | `fixture` | `fixture` \| `apify` \| `linkedin-oidc` |
 | `RATE_LIMIT_MAX` | `30` | per IP per window |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | |
 | `CACHE_TTL_SECONDS` | `900` | `0` disables caching entirely — nothing is stored |
+| `APIFY_API_TOKEN` | — | required only when `PROFILE_SOURCE=apify`; secret — redacted in logs, never returned |
+| `APIFY_ACTOR_ID` | — | required only when `PROFILE_SOURCE=apify`; the LinkedIn-profile Actor to run |
+| `APIFY_TIMEOUT_MS` | `30000` | max wait for an Actor run before `SOURCE_UNAVAILABLE` |
 | `LINKEDIN_CLIENT_ID` | — | required only when `PROFILE_SOURCE=linkedin-oidc` |
 | `LINKEDIN_CLIENT_SECRET` | — | as above |
 | `LINKEDIN_REDIRECT_URI` | — | as above |
@@ -261,9 +272,14 @@ distinct valid slug produces a distinct key — so an unbounded map is a
 memory-growth vector on a public endpoint. Expiry is evaluated on read rather
 than by timer, so the cache never holds the event loop open.
 
-## 7. Fixture source
+## 7. Sources
 
-Selected by `PROFILE_SOURCE=fixture`. Performs no network I/O.
+Selected by `PROFILE_SOURCE`. The pipeline (validate → cache → source → parse →
+verify) is identical regardless of which is active; only the adapter changes.
+
+### 7a. Fixture source (`fixture`, default)
+
+Performs no network I/O.
 
 | Slug | Exercises |
 |---|---|
@@ -272,6 +288,21 @@ Selected by `PROFILE_SOURCE=fixture`. Performs no network I/O.
 | `edge-profile` | Empty strings, empty `elements` array, year-only date, unnamed skill, surname-only name, artifacts with no path segment |
 
 Any other slug returns `404 PROFILE_NOT_FOUND`.
+
+### 7b. Provider source (`apify`)
+
+Selected by `PROFILE_SOURCE=apify`, requires `APIFY_API_TOKEN` and
+`APIFY_ACTOR_ID`. Receives a `CanonicalProfileUrl` (never a raw string — the
+SSRF boundary in §3 has already run), starts the configured Apify Actor over
+Apify's HTTP API, waits up to `APIFY_TIMEOUT_MS` for the run, retrieves the
+dataset, and maps the provider's item into the internal `RawProfile` shape — the
+same shape the fixtures use — so the existing parsers and schema verification
+run unchanged. The provider's response is never exposed directly. Failure
+mapping is in §4. `authorizationScope` states the data comes via Apify and is
+subject to Apify's terms and LinkedIn's policies, not an official LinkedIn API.
+
+Offline tests stub the HTTP layer; `npm test` never calls Apify. A live check is
+a documented manual procedure in the README, run only with credentials set.
 
 ---
 
@@ -301,3 +332,43 @@ Any other slug returns `404 PROFILE_NOT_FOUND`.
 
 All run offline. Failure modes are driven by a stub `ProfileSource` injected
 into `ProfileService`, not by network mocking.
+
+---
+
+## 9. Deployment
+
+Platform-agnostic. Any host that runs a long-running Node process over HTTPS
+satisfies this. Serverless platforms (Vercel, Netlify, Lambda) do **not** — the
+in-memory cache and the graceful-shutdown handler both assume a persistent
+process, so porting to serverless would discard working, tested behaviour.
+
+### Requirements
+
+| Requirement | Detail |
+|---|---|
+| Start command | `node dist/server.js` — **never** `npm start` |
+| Build command | `npm ci && npm run build` |
+| Host | `0.0.0.0`, port read from `PORT` with no hardcoded override |
+| Health check path | `/health` |
+| Secrets | platform environment variables only; `.env` is never deployed |
+| TLS | terminated by the platform; `trust proxy` is set so rate limiting keys on the real client IP |
+
+### The start command is load-bearing
+
+Under `npm start`, npm becomes PID 1 and does not reliably forward `SIGTERM` to
+the node child. The shutdown handler never fires, in-flight requests are cut,
+and nothing appears in the logs to indicate it. Invoking node directly is the
+entire fix. Verify by triggering a redeploy and confirming the shutdown line
+appears in the platform logs — that is the only end-to-end test of the signal
+path, and it cannot be run on Windows.
+
+### Cold starts
+
+A free-tier instance that sleeps on idle will take roughly 30–60 seconds to
+answer its first request after spin-down. This is a platform property, not a
+defect, but an unprepared reader will read it as a broken deployment. It must
+be stated at the top of the README and on the demo page if one is built. Warm
+the instance by requesting `/health` before sharing the URL.
+
+Note the cache is empty after every cold start. Expected, and already covered
+by the cache limitations above.

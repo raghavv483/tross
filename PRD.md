@@ -34,8 +34,9 @@ explicitly-authorized dependency rather than a hardcoded assumption.
 - Search, or resolving a person to a URL
 - Persistence of retrieved profiles beyond a short in-process cache
 - Authentication or multi-tenancy for the API's own consumers
-- A frontend
-- Any form of scraping, credential replay or anti-bot circumvention (see §7)
+- A separate frontend application, framework or second deployment
+- Scraping machinery inside this repository — headless browsers, cookie replay,
+  anti-bot circumvention (a live source calls an external provider's HTTP API; see §7)
 
 ## 4. Users
 
@@ -59,7 +60,9 @@ explicitly-authorized dependency rather than a hardcoded assumption.
 | F8 | Response `meta` reports which source served the request and whether it was cached | Must |
 | F9 | OpenAPI document generated from the same schemas used for validation | Should |
 | F10 | Short-TTL cache keyed on the canonical profile URL | Should |
-| F11 | An authorized live source (`linkedin-oidc`) selectable by environment | Could |
+| F11 | Interactive API docs at `/api/v1/docs`, served from the generated OpenAPI document | Should |
+| F12 | A single static demo page served by the same Express app: URL input, submit, formatted JSON result | Could |
+| F13 | An authorized live source (`linkedin-oidc`) selectable by environment | Could |
 
 ## 6. Non-functional requirements
 
@@ -82,19 +85,28 @@ ships.
 | Sign In with LinkedIn (OIDC) | Authenticated user's own name, picture, email | Yes — self-serve, needs a dev app tied to a Company Page |
 | Marketing / Talent partner APIs | Fuller profile fields, still self-only | No — multi-week partner review |
 | Any first-party API, third party by URL | — | **Does not exist at any tier** |
-| Third-party data vendors | Varies | Paid, business verification, contested compliance posture |
-| Scraping / credential replay | Everything | **Excluded — see below** |
+| Third-party data provider (e.g. Apify) over its HTTP API | Full public profile fields by URL | Yes — paid/usage-tiered; subject to provider terms and LinkedIn policy |
+| In-repo scraping / credential replay | Everything | **Excluded — see below** |
 
-Scraping is out of scope by decision, not by inability. It breaches the
-LinkedIn User Agreement, and the agreement binds the account holder
-personally, so a working scraper is a liability attached to a real identity —
-including one attached publicly to this repository. The build treats "which
-source, authorized on what basis" as a first-class, self-describing property
-of the system instead.
+The live source in this build is a third-party **provider**, reached over that
+provider's documented HTTP API. The provider performs data collection on its
+side under its own terms; this codebase issues an authenticated HTTP request
+and normalizes the result. That is a deliberate boundary: no scraping machinery
+(headless browsers, cookie replay, anti-bot circumvention) lives in this
+repository, so the liability of running a scraper against LinkedIn is not
+carried by this code or the account that deploys it.
 
-**Consequence for this deliverable:** the shipped API is fully functional
-end to end against fixture data. Any live adapter is scoped strictly to what
-its authorization actually covers, and says so at `/health`.
+This is not the same as LinkedIn authorization. A provider-backed source is
+**not** an official or LinkedIn-sanctioned API, and every adapter says so in its
+`authorizationScope`, surfaced at `/health`. Using such a provider carries the
+provider's terms and LinkedIn's policy posture; that trade-off is the operator's
+to accept, and the README states it plainly rather than implying official access.
+
+**Consequence for this deliverable:** the API is fully functional end to end
+against fixture data with zero configuration. With provider credentials set
+(`PROFILE_SOURCE=apify`), the same pipeline returns real profile data by URL.
+The default remains fixture so the test suite and a fresh clone never depend on
+a paid provider or a network call.
 
 ## 8. Acceptance criteria
 
@@ -106,6 +118,7 @@ its authorization actually covers, and says so at `/health`.
 - [ ] Exceeding the rate limit returns 429 `RATE_LIMITED`
 - [ ] Test suite passes offline
 - [ ] No secret present anywhere in git history
+- [ ] `/api/v1/docs` loads and a request can be executed from the browser
 - [ ] README documents setup, API, schema, design decisions and known limitations
 - [ ] Limitations section states the data-source position plainly
 
@@ -114,11 +127,15 @@ its authorization actually covers, and says so at `/health`.
 Redis or any shared cache, webhooks, batch endpoints, persistence,
 API-consumer auth, per-consumer quotas, observability beyond structured logs.
 
+Specifically excluded on the UI side: any client-side framework, bundler or
+build step, and any separately deployed frontend. The demo page in F12, if
+built, is one hand-written HTML file served by the API itself.
+
 ## 10. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Reviewer expected a working scraper and reads the fixture source as incomplete | README and `/health` lead with the reasoning; the swappable adapter shows the work was architectural, not avoided |
+| Provider terms or LinkedIn policy shift, or credentials are absent | Fixture source is the zero-config default and always works; the provider adapter is swappable and its scope is stated at `/health`, so the honest fallback is one env var away |
 | OIDC adapter blocked on Company Page setup | Fixture source is the default and ships regardless; OIDC is `Could`, not `Must` |
 | Over-engineering crowds out finished basics | Explicit non-goals in §3; no infrastructure added without a load-bearing reason |
 | Time lost to environment friction | Known gotchas recorded in `CLAUDE.md` so they are not rediscovered |

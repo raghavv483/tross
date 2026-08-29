@@ -8,7 +8,7 @@ dist/
 # secrets — never commit. .env.example is the committed template.
 .env
 .env.*
-!.env.example
+.env.example
 
 # logs
 *.log

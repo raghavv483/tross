@@ -28,6 +28,9 @@ describe('loadEnv - SPEC §6 defaults', () => {
       RATE_LIMIT_MAX: 30,
       RATE_LIMIT_WINDOW_MS: 60_000,
       CACHE_TTL_SECONDS: 900,
+      APIFY_ACTOR_ID: 'harvestapi/linkedin-profile-scraper',
+      APIFY_PROFILE_SCRAPER_MODE: 'Profile details no email ($4 per 1k)',
+      APIFY_TIMEOUT_MS: 30_000,
     });
   });
 
@@ -96,6 +99,86 @@ describe('loadEnv - linkedin-oidc requires the three LINKEDIN_ variables', () =>
   });
 });
 
+describe('loadEnv - apify requires its provider credentials', () => {
+  const complete = (): Record<string, string> => ({
+    PROFILE_SOURCE: 'apify',
+    APIFY_API_TOKEN: 'apify_api_token_value',
+  });
+
+  it('rejects the source with no token set', () => {
+    expect(() => loadEnv({ PROFILE_SOURCE: 'apify' })).toThrow(ConfigError);
+  });
+
+  it('names APIFY_API_TOKEN when it is missing', () => {
+    try {
+      loadEnv({ PROFILE_SOURCE: 'apify' });
+      expect.unreachable('expected loadEnv to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).keys.join(' ')).toContain('APIFY_API_TOKEN');
+    }
+  });
+
+  it('accepts the source with only the token, since the rest default', () => {
+    expect(loadEnv(complete()).PROFILE_SOURCE).toBe('apify');
+  });
+
+  it('defaults the actor id to the one this build maps', () => {
+    expect(loadEnv(complete()).APIFY_ACTOR_ID).toBe('harvestapi/linkedin-profile-scraper');
+  });
+
+  it('defaults the scraper mode and accepts an override', () => {
+    expect(loadEnv(complete()).APIFY_PROFILE_SCRAPER_MODE).toBe(
+      'Profile details no email ($4 per 1k)',
+    );
+    expect(
+      loadEnv({ ...complete(), APIFY_PROFILE_SCRAPER_MODE: 'Full profile ($8 per 1k)' })
+        .APIFY_PROFILE_SCRAPER_MODE,
+    ).toBe('Full profile ($8 per 1k)');
+  });
+
+  it('accepts an overridden actor id', () => {
+    expect(loadEnv({ ...complete(), APIFY_ACTOR_ID: 'someone/other-actor' }).APIFY_ACTOR_ID).toBe(
+      'someone/other-actor',
+    );
+  });
+
+  it('never prints a present token value when some OTHER key fails', () => {
+    // The token is valid here; PORT is what fails. The secret must still not
+    // appear in a message likely to be pasted into a log or an issue tracker.
+    try {
+      loadEnv({
+        PROFILE_SOURCE: 'apify',
+        APIFY_API_TOKEN: 'apify_api_SECRET_LEAK',
+        PORT: 'not-a-port',
+      });
+      expect.unreachable('expected loadEnv to throw');
+    } catch (error) {
+      const message = (error as ConfigError).message;
+      expect(message).not.toContain('apify_api_SECRET_LEAK');
+      expect(message).toContain('PORT');
+    }
+  });
+
+  it('names APIFY_API_TOKEN when it is blank rather than absent', () => {
+    try {
+      loadEnv({ PROFILE_SOURCE: 'apify', APIFY_API_TOKEN: '   ' });
+      expect.unreachable('expected loadEnv to throw');
+    } catch (error) {
+      expect((error as ConfigError).message).toContain('APIFY_API_TOKEN');
+    }
+  });
+
+  it('does not require apify credentials for the fixture source', () => {
+    expect(loadEnv({ PROFILE_SOURCE: 'fixture' }).APIFY_API_TOKEN).toBeUndefined();
+  });
+
+  it('defaults the run timeout and accepts an override', () => {
+    expect(loadEnv({}).APIFY_TIMEOUT_MS).toBe(30_000);
+    expect(loadEnv({ APIFY_TIMEOUT_MS: '90000' }).APIFY_TIMEOUT_MS).toBe(90_000);
+  });
+});
+
 describe('loadEnv - the failure message names keys only, never values', () => {
   it('names the failing keys', () => {
     try {
@@ -137,6 +220,8 @@ describe('logger redaction is a security control', () => {
     ['client_secret', { client_secret: 'LEAKED' }],
     ['clientSecret', { clientSecret: 'LEAKED' }],
     ['LINKEDIN_CLIENT_SECRET', { LINKEDIN_CLIENT_SECRET: 'LEAKED' }],
+    ['APIFY_API_TOKEN', { APIFY_API_TOKEN: 'LEAKED' }],
+    ['nested APIFY_API_TOKEN', { config: { APIFY_API_TOKEN: 'LEAKED' } }],
     ['password', { password: 'LEAKED' }],
     ['nested password', { user: { password: 'LEAKED' } }],
     ['nested token', { auth: { token: 'LEAKED' } }],

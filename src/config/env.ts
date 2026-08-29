@@ -33,22 +33,61 @@ export const EnvSchema = z
     /** `0` disables caching entirely. */
     CACHE_TTL_SECONDS: z.coerce.number().int().min(0).default(900),
 
+    /**
+     * Apify provider credentials. Required only when PROFILE_SOURCE=apify.
+     * APIFY_API_TOKEN is a secret: it is in the logger redact list and is
+     * never returned in a response or named with its value in a boot error.
+     */
+    APIFY_API_TOKEN: z.string().min(1).optional(),
+    /** The Actor to run. Defaults to the one this build's mapper targets. */
+    APIFY_ACTOR_ID: z.string().min(1).default('harvestapi/linkedin-profile-scraper'),
+    /**
+     * The Actor's own `profileScraperMode` input. It selects which field set
+     * (and price tier) the run returns, so it is configuration rather than a
+     * constant - a deployment may move tiers without a code change.
+     */
+    APIFY_PROFILE_SCRAPER_MODE: z
+      .string()
+      .min(1)
+      .default('Profile details no email ($4 per 1k)'),
+    /** Max wait for an Actor run before SOURCE_UNAVAILABLE. SPEC §6. */
+    APIFY_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+
     LINKEDIN_CLIENT_ID: z.string().min(1).optional(),
     LINKEDIN_CLIENT_SECRET: z.string().min(1).optional(),
     LINKEDIN_REDIRECT_URI: z.string().url().optional(),
   })
   .superRefine((value, ctx) => {
-    if (value.PROFILE_SOURCE !== 'linkedin-oidc') return;
-
-    // These three are required only when the OIDC source is selected. Flagging
-    // them by key keeps the message safe to print.
-    for (const key of ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET', 'LINKEDIN_REDIRECT_URI'] as const) {
-      if (value[key] === undefined) {
+    /**
+     * A source's credentials are required only when that source is selected.
+     * Issues are raised against the KEY, never the value, so the boot error
+     * stays safe to print - see ConfigError below.
+     */
+    if (value.PROFILE_SOURCE === 'apify') {
+      // Only the token has no safe default. The actor id and scraper mode both
+      // default to the pairing this build's mapper is written against.
+      if (value.APIFY_API_TOKEN === undefined) {
         ctx.addIssue({
           code: 'custom',
-          path: [key],
-          message: 'required when PROFILE_SOURCE=linkedin-oidc',
+          path: ['APIFY_API_TOKEN'],
+          message: 'required when PROFILE_SOURCE=apify',
         });
+      }
+    }
+
+    if (value.PROFILE_SOURCE === 'linkedin-oidc') {
+      for (const key of [
+        'LINKEDIN_CLIENT_ID',
+        'LINKEDIN_CLIENT_SECRET',
+        'LINKEDIN_REDIRECT_URI',
+      ] as const) {
+        if (value[key] === undefined) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: 'required when PROFILE_SOURCE=linkedin-oidc',
+          });
+        }
       }
     }
   });

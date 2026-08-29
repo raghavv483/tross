@@ -18,19 +18,30 @@ exact API contract.
 
 These are not style preferences. Breaking one is a defect.
 
-### 1. No unauthorized LinkedIn access, ever
+### 1. No scraping logic inside this repository
 
-Do **not** implement, suggest, or scaffold:
+This service retrieves profile data through external providers over their HTTP
+APIs. It must never contain the scraping machinery itself. Do **not** implement,
+suggest, or scaffold, in any adapter:
 
-- session-cookie replay, `li_at` handling, or any credential-based scraping
-- Voyager / internal endpoint calls
+- headless browsers — Playwright, Puppeteer, Selenium
+- LinkedIn session-cookie replay or `li_at` handling
+- Voyager / internal LinkedIn endpoint calls
 - CAPTCHA, MFA, anti-bot, or rate-limit circumvention
-- headless-browser scraping as a workaround
+
+A source adapter's only outbound contract is a provider's documented HTTP API
+(e.g. Apify's REST API). The provider may perform data collection on its side;
+that is the provider's operation and the provider's terms, reached through a
+normal authenticated HTTP request — not something this codebase does or works
+around.
 
 Every `ProfileSource` implementation must declare an `authorizationScope`
-string stating the basis on which it is permitted to retrieve the data it
-returns. If you cannot write that string honestly, the adapter does not get
-written. When blocked on this, stop and say so — do not route around it.
+string that describes, accurately, on what basis it obtains its data. For a
+third-party provider this states plainly that the data comes via that provider
+and is subject to the provider's terms and to LinkedIn's policies — it must not
+claim to be an official or LinkedIn-authorized API. If you cannot write that
+string honestly, the adapter does not get written. When genuinely blocked, stop
+and say so rather than reaching for any of the banned mechanisms above.
 
 ### 2. Errors only ever leave through `AppError`
 
@@ -171,5 +182,6 @@ structure; `PRD.md` is scope and acceptance criteria.
 Build order: scaffold and config, then errors and types, then URL validation,
 then fixtures and the fixture source, then parsers, then service and cache,
 then the HTTP layer, then integration tests, then OpenAPI plus Swagger UI, then
-README, then deploy. The static demo page and the `linkedin-oidc` adapter are
-both optional and come last, only if every Must and Should in PRD.md has landed.
+README, then deploy. The live provider adapter (`apify`) and the static demo
+page come last, after every Must and Should in PRD.md has landed. The
+`linkedin-oidc` adapter remains an unimplemented, self-scoped alternative.

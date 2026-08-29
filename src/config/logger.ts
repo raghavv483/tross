@@ -64,6 +64,10 @@ export const REDACT_PATHS: readonly string[] = [
   '*.client_secret',
   'LINKEDIN_CLIENT_SECRET',
   '*.LINKEDIN_CLIENT_SECRET',
+  // pino matches exact key names, so the generic `token` path below does NOT
+  // cover this one. Added with the env var itself, per invariant 6.
+  'APIFY_API_TOKEN',
+  '*.APIFY_API_TOKEN',
 
   // --- generic secret-bearing names ---
   'authorization',

@@ -60,6 +60,17 @@ export interface RawCompany {
 
 /** A single role inside a position group. */
 export interface RawPosition {
+  /**
+   * A source-declared "this role is current" flag, when the upstream provides
+   * one authoritatively (Apify's `jobStillWorking`, for instance).
+   *
+   * Optional and additive: when it is absent, the parser derives `isCurrent`
+   * from the dates exactly as before. It exists because date inference gets a
+   * past role with no recorded end date wrong - it reports it as current - and
+   * a provider that states the answer outright should not have that answer
+   * discarded in favour of a guess.
+   */
+  readonly isCurrent?: boolean | null;
   readonly title?: string | null;
   readonly description?: string | null;
   readonly locationName?: string | null;

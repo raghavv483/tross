@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AppError } from '../src/errors/AppError.js';
 import { parseRawProfile } from '../src/parsers/index.js';
+import { loadEnv, type Env } from '../src/config/env.js';
 import { FixtureProfileSource, createProfileSource } from '../src/sources/index.js';
 import { ProfileSchema } from '../src/types/profile.js';
 import { parseLinkedInProfileUrl } from '../src/utils/linkedinUrl.js';
@@ -57,12 +58,45 @@ describe('FixtureProfileSource', () => {
 });
 
 describe('createProfileSource', () => {
+  /** Builds a validated Env for a given source, as boot would. */
+  const envFor = (overrides: Record<string, string>): Env =>
+    loadEnv({ NODE_ENV: 'test', LOG_LEVEL: 'silent', ...overrides });
+
+  /**
+   * A fully-credentialed OIDC env. The credentials must be present or
+   * `loadEnv` rejects first, and the factory - the thing under test here -
+   * would never be reached.
+   */
+  const oidcEnv = (): Env =>
+    envFor({
+      PROFILE_SOURCE: 'linkedin-oidc',
+      LINKEDIN_CLIENT_ID: 'client-id',
+      LINKEDIN_CLIENT_SECRET: 'client-secret',
+      LINKEDIN_REDIRECT_URI: 'https://example.test/callback',
+    });
+
   it('builds the fixture source', () => {
-    expect(createProfileSource('fixture').name).toBe('fixture');
+    expect(createProfileSource(envFor({ PROFILE_SOURCE: 'fixture' })).name).toBe('fixture');
+  });
+
+  it('defaults to the fixture source when PROFILE_SOURCE is unset', () => {
+    expect(createProfileSource(envFor({})).name).toBe('fixture');
+  });
+
+  it('builds the apify source when credentials are configured', () => {
+    const source = createProfileSource(
+      envFor({
+        PROFILE_SOURCE: 'apify',
+        APIFY_API_TOKEN: 'apify_api_token_value',
+      }),
+    );
+
+    expect(source.name).toBe('apify');
+    expect(source.authorizationScope).toContain('Apify');
   });
 
   it('throws for linkedin-oidc, which is deliberately not implemented', () => {
-    expect(() => createProfileSource('linkedin-oidc')).toThrowError(/not implemented/);
+    expect(() => createProfileSource(oidcEnv())).toThrowError(/not implemented/);
   });
 
   it('throws a plain Error, not an AppError, because this fires at boot', () => {
@@ -70,7 +104,7 @@ describe('createProfileSource', () => {
     // must stop the process before the server binds - it can never be reached
     // from a request, so it carries no HTTP status and no client-safe message.
     try {
-      createProfileSource('linkedin-oidc');
+      createProfileSource(oidcEnv());
       expect.unreachable('expected createProfileSource to throw');
     } catch (error) {
       expect(error).toBeInstanceOf(Error);

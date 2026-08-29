@@ -51,69 +51,7 @@ What it deliberately is **not**: it contains no scraping machinery. No headless 
 
 The whole design is organised around one question: **how much code has to change when the data source changes?**
 
-The answer here is **one adapter file and its fixture.** That is not a claim — it was tested mid-build.
-
-### The swap seam, proven
-
-Partway through this build the live provider was replaced: **`dev_fusion/Linkedin-Profile-Scraper` → `harvestapi/linkedin-profile-scraper`**. The two actors differ in essentially everything:
-
-| | dev_fusion | HarvestAPI |
-|---|---|---|
-| Input key | `profileUrls: [url]` | `profileScraperMode` + `queries: [url]` |
-| Dates | strings, month-first `"09-2024"` | objects, `{ month: "Sep", year: 2024 }` |
-| Current role | `jobStillWorking: true` | `endDate: { text: "Present" }` |
-| Experience key | `experiences[]` | `experience[]` |
-| Role title | `title` | `position` |
-| Education degree | one `subtitle`, `"Bachelor of Technology, CCE"` | separate `degree` + `fieldOfStudy` |
-| Skills | `skills[].title` | `skills[].name` |
-| Images | single URL strings | `profilePicture.sizes[]` with real dimensions |
-| Location | `addressWithCountry` string | `location` object |
-
-**That swap touched exactly two files: the adapter (`ApifySource` + its mapper) and its test fixture.** `ProfileService`, the cache, every parser, the error taxonomy, the HTTP layer, the response envelopes and the OpenAPI document were untouched, and the fixture source kept working offline throughout. That is the abstraction earning its keep.
-
-### Request flow
-
-```mermaid
-flowchart TD
-    Client([Client]) -->|POST /api/v1/profile| RL[Rate limit · per IP<br/>/health and /docs exempt]
-    RL --> BC[Body cap · 10 kb]
-    BC --> V[validateBody · Zod<br/>replaces req.body with stripped result]
-    V --> C[ProfileController]
-    C --> S
-
-    subgraph Domain
-      S[ProfileService]
-      S --> U[parseLinkedInProfileUrl<br/>SSRF boundary · host allowlist]
-      U --> CACHE[(TtlCache<br/>keyed on canonical URL)]
-      CACHE -->|miss| SRC
-      CACHE -->|hit| ENV
-    end
-
-    subgraph Sources
-      SRC{ProfileSource}
-      SRC --> F[FixtureProfileSource<br/>offline, zero config]
-      SRC --> A[ApifySource]
-      A -->|HTTPS · Bearer token| H[[HarvestAPI Actor<br/>via Apify REST API]]
-    end
-
-    F --> P[parseRawProfile<br/>raw ➜ domain]
-    H --> M[mapApifyProfile<br/>provider ➜ RawProfile]
-    M --> P
-    P --> VER[ProfileSchema.parse<br/>verify parser output]
-    VER --> CACHE
-    VER --> ENV[ProfileResponseSchema.parse<br/>Zod strips undeclared keys]
-    ENV --> Client
-    EH[errorHandler · single exit<br/>AppError ➜ code + message only] --> Client
-```
-
-### The four boundaries
-
-| Boundary | File | What it guarantees |
-|---|---|---|
-| **Source** | `src/sources/ProfileSource.ts` | Takes `CanonicalProfileUrl`, never a string — an adapter *cannot* skip the SSRF check. Every source declares an `authorizationScope`, surfaced at `/health`. |
-| **Shape** | `src/types/raw.ts` vs `profile.ts` | The public contract never inherits an upstream shape. Provider churn stops at the mapper. |
-| **Failure** | `src/errors/AppError.ts` | One taxonomy, one exit point. Upstream causes ride in `cause` for logs and are never serialized. |
-| **Leak** | `src/schemas/response.ts` | Every response is `.parse()`d before `res.json()`. Zod strips undeclared keys, so an upstream field cannot reach a client. |
+The answer here is **one adapter file and its fixture.** `ProfileService`, the cache, every parser, the error taxonomy, the HTTP layer, the response envelopes and the OpenAPI document never depend on which source is active — only the adapter behind `ProfileSource` does.
 
 ---
 
@@ -138,7 +76,6 @@ Selected with `PROFILE_SOURCE`. The pipeline — validate → cache → source �
 |---|---|---|---|
 | **`fixture`** *(default)* | None | None | Three local profiles: `complete-profile`, `sparse-profile`, `edge-profile`. Any other slug returns `404 PROFILE_NOT_FOUND`. |
 | **`apify`** | Apify REST API | `APIFY_API_TOKEN` | Real public profile data by URL, via the `harvestapi/linkedin-profile-scraper` Actor. |
-| `linkedin-oidc` | — | — | **Not implemented.** Sign In with LinkedIn returns the *authenticated user's own* name, picture and email only — it is not a lookup API. Selecting it fails fast at boot. |
 
 > **The live deployment runs `PROFILE_SOURCE=apify`.** You can confirm it yourself — `GET /health` reports the active source and the basis on which it is allowed to return what it returns.
 
@@ -171,7 +108,7 @@ Base URL: `https://tross-linkedin-api-1poe.onrender.com`
 
 | Field | Type | Rules |
 |---|---|---|
-| `url` | string | Required. Trimmed. 1-2048 characters. Must pass URL validation (see [Security](#security)). |
+| `url` | string | Required. Trimmed. 1-2048 characters. Must be a `linkedin.com` (or true subdomain) profile URL matching `/in/<slug>`. |
 
 Unknown body keys are **stripped, not rejected**. The body is capped at 10 kb.
 
@@ -441,11 +378,9 @@ No stack traces, no upstream payloads, no additional keys. `src/middleware/error
 
 **`MALFORMED_SOURCE_RESPONSE` is raised at two distinct points.** Because every scalar is nullable and every list defaults to `[]`, garbage would parse *cleanly* into a valid empty profile — so the parser cannot be the thing that detects it, and parsers are forbidden from throwing. `ProfileService` therefore rejects a non-object provider response **before** parsing, and `ProfileSchema.parse` **after** parsing catches a genuine bug in the parser itself. Both surface as 502; neither is the parser's responsibility.
 
-**`SOURCE_UNAUTHORIZED` vs `SOURCE_NOT_AUTHORIZED_FOR_URL`** — the second is the normal, expected answer from a self-scoped source such as OIDC, and is not a fault.
+**`SOURCE_UNAUTHORIZED` vs `SOURCE_NOT_AUTHORIZED_FOR_URL`** — the second is the normal, expected answer from a self-scoped source, and is not a fault.
 
-### Provider errors never leak
-
-Only the provider's **HTTP status code** is read from a failed response — the body is never parsed into a message. The API token, request headers and the provider's raw error payload never appear in a response. A test drives a planted token through the 401, 429, 500, network-failure and malformed-response paths and asserts the public body contains neither the token nor the string `Bearer`, and has exactly the keys `code` and `message`. Diagnostics that *are* useful (`reason`, `receivedType`, the item keys actually seen) go to the log context only.
+Only the provider's **HTTP status code** is read from a failed response — the body is never parsed into a message. The API token, request headers and the provider's raw error payload never appear in a response.
 
 ---
 
@@ -459,7 +394,7 @@ Validated once at boot with Zod. **Invalid configuration throws before the serve
 | `HOST` | `0.0.0.0` | No | |
 | `NODE_ENV` | `development` | No | `development` enables pretty logs |
 | `LOG_LEVEL` | `info` | No | incl. `silent` — note a silent server looks dead but is running |
-| `PROFILE_SOURCE` | `fixture` | No | `fixture` \| `apify` \| `linkedin-oidc` |
+| `PROFILE_SOURCE` | `fixture` | No | `fixture` \| `apify` |
 | `RATE_LIMIT_MAX` | `30` | No | per IP per window |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | No | |
 | `CACHE_TTL_SECONDS` | `900` | No | `0` disables caching entirely — nothing is stored |
@@ -467,9 +402,6 @@ Validated once at boot with Zod. **Invalid configuration throws before the serve
 | `APIFY_ACTOR_ID` | `harvestapi/linkedin-profile-scraper` | No | Converted to the tilde form for the API path. Change it only alongside a mapper that matches its output. |
 | `APIFY_PROFILE_SCRAPER_MODE` | `Profile details no email ($4 per 1k)` | No | The Actor's own input mode — selects field set and price tier |
 | `APIFY_TIMEOUT_MS` | `30000` | No | Max wait for a run before `SOURCE_UNAVAILABLE` |
-| `LINKEDIN_CLIENT_ID` | — | Only for `linkedin-oidc` | |
-| `LINKEDIN_CLIENT_SECRET` | — | Only for `linkedin-oidc` | **Secret.** Redacted in logs. |
-| `LINKEDIN_REDIRECT_URI` | — | Only for `linkedin-oidc` | |
 
 Blank values are treated as absent, so a `APIFY_API_TOKEN=` placeholder in a `.env` file does not fail boot with a confusing "must be at least 1 character".
 
@@ -512,7 +444,7 @@ The three fixture slugs are `complete-profile`, `sparse-profile` and `edge-profi
 | Script | What it does |
 |---|---|
 | `npm run dev` | `tsx watch`, loads `.env` if present |
-| `npm test` | Vitest — **476 tests, fully offline** |
+| `npm test` | Vitest — 476 tests, fully offline |
 | `npm run typecheck` | `tsc --noEmit` over `src/` and the test config |
 | `npm run build` | Compiles to `dist/` |
 | `npm start` | `node dist/server.js` |
@@ -543,69 +475,6 @@ The free instance sleeps after ~15 minutes idle. The first request then takes **
 
 ---
 
-## Security
-
-### The SSRF boundary
-
-`src/utils/linkedinUrl.ts` is the **only** place a user-supplied URL is interpreted. It returns a branded `CanonicalProfileUrl`, and `ProfileSource.getProfile()` takes that type rather than a string — so a future adapter *cannot* parse the raw input itself and quietly skip the host allowlist. The type system prevents it.
-
-Accepted: `http`/`https`, host exactly `linkedin.com` or a **true subdomain** of it, path matching `/in/<slug>`. The host check is exact-match or true-subdomain — never a substring test, which would admit both of the first two rows below.
-
-| Rejected input | Why |
-|---|---|
-| `https://evil-linkedin.com/in/x` | suffix confusion |
-| `https://linkedin.com.evil.com/in/x` | prefix confusion |
-| `http://169.254.169.254/in/x` | cloud metadata endpoint |
-| `http://localhost/in/x` | loopback |
-| `file:///etc/passwd` | non-HTTP scheme |
-| `https://user:pass@www.linkedin.com/in/x` | embedded credentials |
-| `https://www.linkedin.com:8080/in/x` | explicit port |
-| `https://www.linkedin.com/company/tross` | not a profile path |
-| `https://www.linkedin.com` | no profile path |
-
-Also rejected, from testing URL-normalization tricks: `linkedin.com\@evil.com` (backslash normalizes to userinfo), `www.linkedin.com%2eevil.com` (percent-encoded dot), `/in/%2e%2e` (encoded dot segments), and a default port written explicitly as `:443`. Query strings are **stripped rather than rejected**, so an SSRF payload in `?next=` cannot survive into the URL a provider is handed.
-
-### Everything else
-
-| Control | Implementation |
-|---|---|
-| **Body cap** | `express.json({ limit: '10kb' })` — the only valid request is one short URL |
-| **Rate limiting** | Per IP, `express-rate-limit`. `trust proxy` is `1` (not `true`) so a client cannot forge `X-Forwarded-For` to evade it. Rejected requests count, so an invalid URL cannot be used to probe for free. |
-| **Secret redaction** | pino `redact` covers auth/cookie/api-key headers, both `camelCase` and `snake_case` OAuth token spellings, client secrets, and `APIFY_API_TOKEN` by name — pino matches exact keys, so the generic `token` path does not cover it. Treated as a security control, not formatting. |
-| **Response leak guard** | Every success response is `.parse()`d against a Zod envelope before `res.json()`. Zod strips undeclared keys, so an unexpected upstream field cannot reach a client even if it survived the parser. |
-| **No secrets in the repo** | `.env` is gitignored; `.env.example` carries empty placeholders only. No token appears in any tracked file. |
-| **No open proxy** | The service fetches nothing but the configured provider's API, and only for URLs that already passed the allowlist. |
-
----
-
-## Testing
-
-**476 tests across 10 files, fully offline.** `npm test` makes no network call of any kind — `api.apify.com` appears nowhere under `tests/`.
-
-| Area | Coverage |
-|---|---|
-| URL validation | Every SSRF row above, plus normalization tricks, canonicalization, and the assertion that casing/subdomain variants collapse to one cache key |
-| Parsers | Every normalization rule, `PartialDate` edge cases, and 19 hostile inputs (`null`, `42`, `'a string'`, arrays where objects belong) each asserted to still yield a schema-valid profile rather than throwing |
-| Config | Defaults, fail-fast per source, and that a boot error never prints a secret value |
-| Logger | A planted `LEAKED` sentinel pushed through every redact path |
-| Cache | TTL expiry on an injected clock, `ttlMs <= 0` storing nothing, bounded eviction |
-| Service | Every failure mode driven by an injected stub source — no network mocking |
-| HTTP | supertest against `createApp()` in-process; no port is ever bound |
-| Apify adapter | 105 tests against the **real captured provider output**, with HTTP injected |
-| Docs | That the documented example still equals what the API actually returns |
-
-Two deliberate choices worth calling out:
-
-- **Failure modes are driven by injected stubs, not network mocks.** `ProfileService` takes its source and cache as constructor arguments, so a test can make a source throw `SOURCE_RATE_LIMITED` or return a non-object without any HTTP layer involved at all.
-- **The Apify fixture is a real captured run**, not a hand-written approximation. An earlier reconstruction-from-description turned out to disagree with reality in several fields; the fixture now carries a provenance comment saying exactly where it came from.
-
-```
- Test Files  10 passed (10)
-      Tests  476 passed (476)
-```
-
----
-
 ## Known limitations
 
 Stated plainly, because the data-source position is the architecturally significant fact about this project.
@@ -614,10 +483,10 @@ Stated plainly, because the data-source position is the architecturally signific
 `PROFILE_SOURCE=apify` retrieves data through **HarvestAPI**, a third-party Actor reached over **Apify's documented HTTP API**. It is **not** an official, LinkedIn-sanctioned or LinkedIn-authorized API, and this README does not imply otherwise. Use is subject to **Apify's terms and to LinkedIn's policies**, and that trade-off is the operator's to accept. The same statement is machine-readable at `/health` via `authorizationScope`.
 
 **2. There is no first-party alternative.**
-No LinkedIn API at any self-serve tier returns a third party's profile by URL. Sign In with LinkedIn (OIDC) returns the *authenticated user's own* name, picture and email and nothing else; fuller fields sit behind partner programmes with multi-week review. That is why `linkedin-oidc` remains deliberately unimplemented rather than pretending to be a lookup source.
+No LinkedIn API at any self-serve tier returns a third party's profile by URL. Sign In with LinkedIn (OIDC) returns the *authenticated user's own* name, picture and email and nothing else; fuller fields sit behind partner programmes with multi-week review.
 
 **3. No scraping lives in this repository.**
-No headless browser, no session-cookie replay, no internal-endpoint calls, no CAPTCHA or bot-detection avoidance. The provider performs collection on its side under its own terms; this codebase issues one authenticated HTTP request and normalizes the result. That boundary is deliberate: the liability of running a scraper against LinkedIn is not carried by this code or the account that deploys it.
+No headless browser, no session-cookie replay, no internal-endpoint calls, no CAPTCHA or bot-detection avoidance. The provider performs collection on its side under its own terms; this codebase issues one authenticated HTTP request and normalizes the result.
 
 **4. Provider runs cost money.**
 Each `apify` lookup is a paid Actor run on the provider side. The default source is `fixture` precisely so a fresh clone, the test suite and local development never touch a paid provider or the network.
@@ -626,10 +495,10 @@ Each `apify` lookup is a paid Actor run on the provider side. The default source
 Freshness, completeness and availability are HarvestAPI's, not this service's. Fields legitimately vary between profiles — which is why every scalar is nullable and every list defaults to `[]`.
 
 **6. The cache is per-instance and volatile.**
-In-memory, bounded to 1000 entries with oldest-insertion eviction, cleared on every restart and every cold start. Deliberately not Redis: a single-instance read API does not need a network hop and a second deployable to demonstrate caching. Horizontal scaling would need a shared cache.
+In-memory, bounded to 1000 entries with oldest-insertion eviction, cleared on every restart and every cold start. Deliberately not Redis. Horizontal scaling would need a shared cache.
 
 **7. `certifications` and `languages` mappings are inferred.**
-Both arrays were empty in the captured profile, so their inner field names are best-effort and defensive. They are held to "produces `[]` and never throws" rather than exact field fidelity, and are commented as such in the mapper. They need revisiting against a profile that populates them.
+Both arrays were empty in the captured profile, so their inner field names are best-effort and defensive. They are held to "produces `[]` and never throws" rather than exact field fidelity.
 
 **8. Cold starts on the free tier.** See the warning at the top.
 
